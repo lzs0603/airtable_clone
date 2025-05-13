@@ -2,7 +2,17 @@ import React from "react";
 import { PanelLeft, HelpCircle, Search, Database } from "lucide-react";
 import { UserDropdown } from "./UserDropdown";
 
-export default function DashboardHeader({ user }) {
+export default function DashboardHeader({
+  user,
+}: {
+  user: Partial<{
+    id: string;
+    name: string | null;
+    email: string | null;
+    emailVerified: Date | null;
+    image: string | null;
+  }>;
+}) {
   return (
     <header className="flex items-center justify-between border-b border-gray-200 px-4 py-2">
       <div className="flex items-center">

@@ -1,7 +1,7 @@
 import { Database } from "lucide-react";
 import Link from "next/link";
-
-export function BaseCard({ base }: { base: any }) {
+import type { Base } from "@prisma/client";
+export function BaseCard({ base }: { base: Base }) {
   return (
     <Link
       href={`/base/${base.id}`}

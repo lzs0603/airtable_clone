@@ -2,8 +2,6 @@ import { auth } from "~/server/auth";
 import { redirect } from "next/navigation";
 import { db } from "~/server/db";
 import { Plus, Database } from "lucide-react";
-import Link from "next/link";
-import { UserDropdown } from "../_components/dashboard/UserDropdown";
 import Leftbar from "../_components/dashboard/Leftbar";
 import { BaseCard } from "../_components/dashboard/BaseCard";
 import type { Base } from "@prisma/client";
@@ -15,6 +13,7 @@ export default async function page() {
   if (!session?.user) {
     return redirect("/");
   }
+  console.log(session.user);
 
   const bases = await db.base.findMany({
     where: {
