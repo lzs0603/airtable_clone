@@ -21,12 +21,12 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <SessionProvider>
-      <html lang="en" className={`${geist.variable}`}>
-        <body>
+    <html lang="en" className={`${geist.variable}`}>
+      <body>
+        <SessionProvider>
           <TRPCReactProvider>{children}</TRPCReactProvider>
-        </body>
-      </html>
-    </SessionProvider>
+        </SessionProvider>
+      </body>
+    </html>
   );
 }
