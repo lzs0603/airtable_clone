@@ -28,4 +28,19 @@ export const baseRouter = createTRPCRouter({
       },
     });
   }),
+
+  getById: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+      }),
+    )
+    .query(async ({ ctx, input }): Promise<Base | null> => {
+      return ctx.db.base.findFirst({
+        where: {
+          id: input.id,
+          ownerId: ctx.session.user.id,
+        },
+      });
+    }),
 });

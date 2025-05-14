@@ -11,7 +11,7 @@ export default function CreateBase() {
   const { mutate, error } = api.base.create.useMutation({
     onSuccess: () => {
       setBaseName("");
-      utils.base.list.invalidate(); // 刷新 base 列表
+      void utils.base.list.invalidate(); // 刷新 base 列表
     },
   });
 
@@ -23,7 +23,7 @@ export default function CreateBase() {
         onChange={(e) => setBaseName(e.target.value)}
       />
       <Button
-        onClick={() => mutate({ name: baseName })}
+        onClick={() => void mutate({ name: baseName })}
         disabled={baseName.trim() === ""}
       >
         Create Base

@@ -75,6 +75,7 @@ model Table {
   base      Base     @relation(fields: [baseId], references: [id])
   fields    Field[]
   records   Record[]
+  views     View[]
 }
 
 model Field {
@@ -83,14 +84,44 @@ model Field {
   type    String // "text" | "number"
   order   Int
   tableId String
-  table   Table @relation(fields: [tableId], references: [id])
+  
+  table   Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  cellValues CellValue[]
 }
 
 model Record {
-  id      String @id @default(cuid())
-  tableId String
+  id        String   @id @default(cuid())
+  tableId   String
   createdAt DateTime @default(now())
-  table   Table @relation(fields: [tableId], references: [id])
+  
+  table     Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  cellValues CellValue[]
+}
+
+model CellValue {
+  id        String @id @default(cuid())
+  recordId  String
+  fieldId   String
+  textValue String?
+  numberValue Float?
+  
+  record    Record @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  field     Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  
+  @@unique([recordId, fieldId])
+}
+
+model View {
+  id        String   @id @default(cuid())
+  name      String
+  tableId   String
+  filters   String?  // JSON格式存储过滤条件
+  sorts     String?  // JSON格式存储排序条件
+  hiddenFields String? // JSON格式存储隐藏的字段ID列表
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  table     Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
 }
 
 model VerificationToken {
