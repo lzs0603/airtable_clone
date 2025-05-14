@@ -73,6 +73,24 @@ model Table {
   updatedAt DateTime @updatedAt
 
   base      Base     @relation(fields: [baseId], references: [id])
+  fields    Field[]
+  records   Record[]
+}
+
+model Field {
+  id      String @id @default(cuid())
+  name    String
+  type    String // "text" | "number"
+  order   Int
+  tableId String
+  table   Table @relation(fields: [tableId], references: [id])
+}
+
+model Record {
+  id      String @id @default(cuid())
+  tableId String
+  createdAt DateTime @default(now())
+  table   Table @relation(fields: [tableId], references: [id])
 }
 
 model VerificationToken {
