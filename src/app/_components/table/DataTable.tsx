@@ -198,7 +198,7 @@ export default function DataTable({
     getScrollElement: () => tableContainerRef.current,
     estimateSize: () => 45, // 每行高度估计
     overscan: 10, // 增加overscan以确保数据不会消失
-    measureElement: typeof window !== 'undefined' && navigator.userAgent.indexOf('Firefox') < 0
+    measureElement: typeof window !== 'undefined' && !navigator.userAgent.includes('Firefox')
       ? (element) => element?.getBoundingClientRect().height ?? 45
       : undefined,  // 动态测量行高，但在Firefox中禁用(可能导致性能问题)
   });
