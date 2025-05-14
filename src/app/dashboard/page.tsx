@@ -44,7 +44,7 @@ export default async function page() {
             <h1 className="mb-2 text-2xl font-bold text-slate-800">欢迎回来，{session.user.name ?? '用户'}</h1>
             <p className="text-slate-600 mb-4">继续处理您的项目或创建新的基地</p>
             <div className="flex gap-3">
-              <CreateBaseButton className="bg-blue-600 hover:bg-blue-700">
+              <CreateBaseButton className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium shadow-xs h-9 px-4 py-2">
                 <Plus className="mr-2 h-4 w-4" />
                 创建新基地
               </CreateBaseButton>

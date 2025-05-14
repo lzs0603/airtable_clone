@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -109,51 +109,56 @@ export default function DataTable({
   // 记录已获取的数据ID集合，防止重复渲染
   const fetchedIdsRef = useRef(new Set<string>());
   
+  const loadMoreRef = useRef<HTMLDivElement>(null); // 哨兵元素
+  
   // 处理Tab键导航
-  const handleTabNavigation = (rowIndex: number, columnIndex: number, shiftKey: boolean) => {
-    const totalColumns = fields.length;
-    let nextRow = rowIndex;
-    let nextColumn = columnIndex;
+  const handleTabNavigation = useCallback(
+    (rowIndex: number, columnIndex: number, shiftKey: boolean) => {
+      const totalColumns = fields.length;
+      let nextRow = rowIndex;
+      let nextColumn = columnIndex;
 
-    if (shiftKey) {
-      // Shift+Tab: 向前导航
-      if (columnIndex > 0) {
-        nextColumn = columnIndex - 1;
+      if (shiftKey) {
+        // Shift+Tab: 向前导航
+        if (columnIndex > 0) {
+          nextColumn = columnIndex - 1;
+        } else {
+          // 移动到上一行的最后一列
+          if (rowIndex > 0) {
+            nextRow = rowIndex - 1;
+            nextColumn = totalColumns - 1;
+          }
+        }
       } else {
-        // 移动到上一行的最后一列
-        if (rowIndex > 0) {
-          nextRow = rowIndex - 1;
-          nextColumn = totalColumns - 1;
+        // Tab: 向后导航
+        if (columnIndex < totalColumns - 1) {
+          nextColumn = columnIndex + 1;
+        } else {
+          // 移动到下一行的第一列
+          nextRow = rowIndex + 1;
+          nextColumn = 0;
         }
       }
-    } else {
-      // Tab: 向后导航
-      if (columnIndex < totalColumns - 1) {
-        nextColumn = columnIndex + 1;
-      } else {
-        // 移动到下一行的第一列
-        nextRow = rowIndex + 1;
-        nextColumn = 0;
-      }
-    }
 
-    // 更新焦点
-    setFocusedCell({ rowIndex: nextRow, columnIndex: nextColumn });
-  };
+      // 更新焦点
+      setFocusedCell({ rowIndex: nextRow, columnIndex: nextColumn });
+    },
+    [fields.length]
+  );
 
-  // 获取记录数据
+  // 获取记录数据（一次请求两页）
   const { data, isLoading, isFetching, fetchNextPage, hasNextPage } = 
     api.record.list.useInfiniteQuery(
       {
         tableId,
-        limit: pageSize,
+        limit: pageSize * 2, // 一次请求两页
         search,
       },
       {
         getNextPageParam: (lastPage) => lastPage.nextCursor,
         refetchOnWindowFocus: false,
-        staleTime: 60 * 1000, // 增加到1分钟，减少重新获取频率
-        gcTime: 5 * 60 * 1000, // 在垃圾回收前保持缓存数据5分钟
+        staleTime: 60 * 1000,
+        gcTime: 5 * 60 * 1000,
       }
     );
 
@@ -182,17 +187,12 @@ export default function DataTable({
     
     try {
       setIsLoadingMore(true);
-      
-      // 添加日志以便调试
-      console.log('Fetching next page...');
-      
-      // 直接获取下一页数据，简化流程
       await fetchNextPage();
       
-      // 设置一个短暂的延迟，防止快速连续触发
+      // 延迟重置加载状态
       setTimeout(() => {
         setIsLoadingMore(false);
-      }, 200);
+      }, 300);
     } catch (error) {
       console.error("Failed to fetch next page:", error);
       setIsLoadingMore(false);
@@ -340,10 +340,16 @@ export default function DataTable({
     count: totalFetched,
     getScrollElement: () => tableContainerRef.current,
     estimateSize: () => 45, // 每行高度估计
-    overscan: 10, // 增加overscan以确保数据不会消失
-    measureElement: typeof window !== 'undefined' && !navigator.userAgent.includes('Firefox')
-      ? (element) => element?.getBoundingClientRect().height ?? 45
-      : undefined,  // 动态测量行高，但在Firefox中禁用(可能导致性能问题)
+    overscan: 20, // 增加overscan，提供更平滑的滚动体验
+    // 优化性能的测量函数
+    measureElement: 
+      typeof window !== 'undefined' 
+        ? (element) => {
+            // 使用一个更高效的方式获取元素高度
+            if (!element) return 45;
+            return element.getBoundingClientRect().height || 45;
+          }
+        : undefined,
   });
   
   // 当focusedCell变化时，找到对应的元素并聚焦
@@ -357,10 +363,8 @@ export default function DataTable({
         const cellElement = document.querySelector(
           `[data-row-index="${rowIndex}"][data-col-index="${columnIndex}"]`
         );
-        
-        if (cellElement) {
-          (cellElement as HTMLElement).focus();
-        } else if (rowIndex >= rows.length) {
+        (cellElement as HTMLElement | null)?.focus();
+        if (!cellElement && rowIndex >= rows.length) {
           // 如果焦点超出了当前加载的行，尝试加载更多数据
           if (hasNextPage && !isLoadingMore && !isFetching) {
             void fetchNextPage();
@@ -370,51 +374,25 @@ export default function DataTable({
     }
   }, [focusedCell, table, hasNextPage, fetchNextPage, isFetching, isLoadingMore]);
   
-  // 处理无限滚动
+  // 处理无限滚动（移除滚动事件监听，只用 IntersectionObserver）
   useEffect(() => {
-    const handleScroll = (e: Event) => {
-      const containerRefElement = e.target as HTMLDivElement;
-      if (!containerRefElement) return;
-      
-      const { scrollHeight, scrollTop, clientHeight } = containerRefElement;
-      
-      // 更直接的方式检测是否要加载更多数据
-      // 当滚动到距离底部100px时就加载更多
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      if (
-        distanceFromBottom < 100 &&
-        !isLoadingMore &&
-        !isFetching &&
-        hasNextPage
-      ) {
-        console.log('Loading more data from scroll...');
-        void debouncedFetchNextPage();
+    if (!hasNextPage || isLoadingMore || isFetching) return;
+    if (!tableContainerRef.current || !loadMoreRef.current) return;
+
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void debouncedFetchNextPage();
+        }
+      },
+      {
+        root: tableContainerRef.current,
+        rootMargin: '300px', // 提前加载
       }
-      
-      // 向上滚动时，当接近顶部时刷新数据
-      if (
-        scrollTop < 50 &&
-        !isLoadingTop &&
-        !isFetching
-      ) {
-        console.log('Refreshing data from top scroll...');
-        void refreshAllData();
-      }
-    };
-    
-    const currentRef = tableContainerRef.current;
-    
-    if (currentRef) {
-      // 直接添加事件监听，移除防抖处理，减少延迟
-      currentRef.addEventListener('scroll', handleScroll);
-    }
-    
-    return () => {
-      if (currentRef) {
-        currentRef.removeEventListener('scroll', handleScroll);
-      }
-    };
-  }, [debouncedFetchNextPage, hasNextPage, isFetching, isLoadingMore, isLoadingTop, refreshAllData]);
+    );
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasNextPage, isLoadingMore, isFetching, debouncedFetchNextPage]);
 
   // 更新已获取的记录ID集合
   useEffect(() => {
@@ -428,8 +406,12 @@ export default function DataTable({
   useEffect(() => {
     // 初始加载时获取第一页数据后，立即加载第二页，但不继续自动加载更多
     if (data && data.pages.length === 1 && !isFetching && hasNextPage) {
-      // 只在初始加载后加载一次第二页，不持续预取
-      void fetchNextPage().catch(e => console.error(e));
+      // 添加短暂延迟，确保UI已经渲染
+      const timer = setTimeout(() => {
+        void fetchNextPage();
+      }, 100);
+      
+      return () => clearTimeout(timer);
     }
   }, [data, fetchNextPage, hasNextPage, isFetching]);
 
@@ -445,213 +427,240 @@ export default function DataTable({
   }
 
   return (
-    <div className="h-full w-full flex flex-col">
-      {/* 表格工具栏 */}
-      <div className="px-4 py-2 border-b flex items-center justify-between bg-white">
-        <div className="flex items-center space-x-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => void createRecord({ tableId })}
-            className="flex items-center"
-          >
-            <Plus className="h-3.5 w-3.5 mr-1" /> 添加行
-          </Button>
+    <div className="w-full h-full min-h-screen flex items-center justify-center bg-slate-100">
+      <div className="w-full max-w-[98vw] mx-auto my-2 rounded-xl shadow-lg bg-white flex flex-col overflow-hidden border border-slate-200" style={{minHeight: '80vh'}}>
+        {/* 表格工具栏 */}
+        <div className="px-6 py-3 border-b flex items-center justify-between bg-white shrink-0">
+          <div className="flex items-center space-x-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => void createRecord({ tableId })}
+              className="flex items-center"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" /> 添加行
+            </Button>
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => void refreshAllData()}
+                  disabled={isLoadingTop}
+                  className="flex items-center"
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5 mr-1", isLoadingTop && "animate-spin")} /> 
+                  刷新
+                </Button>
+              </TooltipTrigger>
+            </Tooltip>
+          </div>
           
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => void refreshAllData()}
-                disabled={isLoadingTop}
-                className="flex items-center"
-              >
-                <RefreshCw className={cn("h-3.5 w-3.5 mr-1", isLoadingTop && "animate-spin")} /> 
-                刷新
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>刷新数据</TooltipContent>
-          </Tooltip>
+          <div className="flex items-center space-x-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center">
+                  <Filter className="h-3.5 w-3.5 mr-1" /> 过滤
+                  <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>过滤选项</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="justify-between">
+                  创建过滤器 <Plus className="h-3.5 w-3.5" />
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center">
+                  <Eye className="h-3.5 w-3.5 mr-1" /> 字段
+                  <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>显示/隐藏字段</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {table.getAllColumns().map((column) => {
+                  // 如果列没有headerValue，则可能是一个特殊列（如操作列），不要显示
+                  if (!column.columnDef.header) return null;
+                  
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={column.id}
+                      className="capitalize"
+                      checked={column.getIsVisible()}
+                      onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                    >
+                      {typeof column.columnDef.header === 'string' 
+                        ? column.columnDef.header 
+                        : fields.find(f => f.id === column.id)?.name ?? column.id}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center">
+                  <Download className="h-3.5 w-3.5 mr-1" /> 导出
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>导出数据</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
-        
-        <div className="flex items-center space-x-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="flex items-center">
-                <Filter className="h-3.5 w-3.5 mr-1" /> 过滤
-                <ChevronDown className="h-3.5 w-3.5 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>过滤选项</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="justify-between">
-                创建过滤器 <Plus className="h-3.5 w-3.5" />
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="flex items-center">
-                <Eye className="h-3.5 w-3.5 mr-1" /> 字段
-                <ChevronDown className="h-3.5 w-3.5 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>显示/隐藏字段</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {table.getAllColumns().map((column) => {
-                // 如果列没有headerValue，则可能是一个特殊列（如操作列），不要显示
-                if (!column.columnDef.header) return null;
-                
-                return (
-                  <DropdownMenuCheckboxItem
-                    key={column.id}
-                    className="capitalize"
-                    checked={column.getIsVisible()}
-                    onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                  >
-                    {typeof column.columnDef.header === 'string' 
-                      ? column.columnDef.header 
-                      : fields.find(f => f.id === column.id)?.name ?? column.id}
-                  </DropdownMenuCheckboxItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" className="flex items-center">
-                <Download className="h-3.5 w-3.5 mr-1" /> 导出
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>导出数据</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
 
-      {/* 表格内容区域 */}
-      <div 
-        className="relative flex-1 overflow-auto border-t" 
-        ref={tableContainerRef}
-        style={{ height: 'calc(100vh - 180px)' }}
-      >
-        {/* 顶部加载指示器 */}
-        {isLoadingTop && (
-          <div className="sticky top-0 left-0 right-0 z-20 flex justify-center bg-white p-2 text-center border-b">
-            <div className="flex items-center">
-              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-              <span className="text-sm">刷新数据中...</span>
-            </div>
-          </div>
-        )}
-        
-        {/* 表头 */}
-        <div className="sticky top-0 z-10 bg-white">
-          <div className="flex w-max min-w-full border-b">
-            {table.getHeaderGroups().map(headerGroup => (
-              <div key={headerGroup.id} className="flex w-full">
-                {headerGroup.headers.map(header => (
-                  <div 
-                    key={header.id}
-                    className="border-r last:border-r-0 py-3 px-4 bg-slate-50"
-                    style={{ 
-                      width: header.getSize(),
-                    }}
-                  >
-                    {header.isPlaceholder 
-                      ? null 
-                      : flexRender(header.column.columnDef.header, header.getContext())
-                    }
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-        
-        {/* 表格内容 - 使用虚拟滚动 */}
-        <div
-          style={{
-            height: `${rowVirtualizer.getTotalSize()}px`,
-            width: '100%',
-            position: 'relative',
+        {/* 表格内容区域 */}
+        <div 
+          className="relative flex-1 overflow-auto border-t"
+          ref={tableContainerRef}
+          style={{ 
+            overscrollBehavior: 'contain',
+            minHeight: 300,
+            maxHeight: '70vh',
+            paddingLeft: 8,
+            paddingRight: 8,
+            background: 'white',
           }}
-          className="w-max min-w-full"
         >
-          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            
-            if (!row) return null;
-            
-            return (
-              <div
-                key={row.id}
-                data-index={virtualRow.index}
-                className={cn(
-                  "absolute top-0 left-0 w-full border-b hover:bg-slate-50/70 transition-colors",
-                  row.getIsSelected() && "bg-slate-100/80"
-                )}
-                style={{
-                  height: `${virtualRow.size}px`,
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-              >
-                <div className="flex h-full w-max min-w-full">
-                  {row.getVisibleCells().map((cell, colIndex) => (
+          {/* 顶部加载指示器 */}
+          {isLoadingTop && (
+            <div className="sticky top-0 left-0 right-0 z-20 flex justify-center bg-white p-2 text-center border-b shadow-sm">
+              <div className="flex items-center">
+                <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                <span className="text-sm">刷新数据中...</span>
+              </div>
+            </div>
+          )}
+          
+          {/* 表头 */}
+          <div className="sticky top-0 z-10 bg-white">
+            <div className="flex w-max min-w-full border-b">
+              {table.getHeaderGroups().map(headerGroup => (
+                <div key={headerGroup.id} className="flex w-full">
+                  {headerGroup.headers.map(header => (
                     <div 
-                      key={cell.id} 
-                      className="border-r last:border-r-0 px-4 py-2 flex items-center"
-                      data-row-index={virtualRow.index}
-                      data-col-index={colIndex}
+                      key={header.id}
+                      className="border-r last:border-r-0 py-3 px-4 bg-slate-50"
                       style={{ 
-                        width: cell.column.getSize(),
+                        width: header.getSize(),
                       }}
                     >
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
+                      {header.isPlaceholder 
+                        ? null 
+                        : flexRender(header.column.columnDef.header, header.getContext())
+                      }
                     </div>
                   ))}
                 </div>
-              </div>
-            );
-          })}
-        </div>
-        
-        {/* 底部加载指示器 */}
-        {isLoadingMore && (
-          <div className="sticky bottom-0 left-0 right-0 flex justify-center bg-white p-2 text-center border-t">
-            <div className="flex items-center">
-              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-              <span className="text-sm">加载更多数据...</span>
+              ))}
             </div>
           </div>
-        )}
-      </div>
-
-      {/* 底部状态栏 */}
-      <div className="px-4 py-2 border-t flex items-center justify-between bg-white text-sm text-muted-foreground">
-        <div>
-          {`已加载 ${totalFetched} 行，共 ${totalDBRowCount} 行`}
-        </div>
-        
-        <div>
-          {Object.keys(rowSelection).length > 0 && (
-            <span className="mr-4">已选择 {Object.keys(rowSelection).length} 行</span>
-          )}
-          <Button 
-            variant="ghost" 
-            size="sm"
-            onClick={() => void createRecord({ tableId })}
-            className="flex items-center"
+          
+          {/* 表格内容 - 使用虚拟滚动 */}
+          <div
+            style={{
+              height: `${rowVirtualizer.getTotalSize()}px`,
+              width: '100%',
+              position: 'relative',
+            }}
+            className="w-max min-w-full"
           >
-            <Plus className="h-3.5 w-3.5 mr-1" /> 添加行
-          </Button>
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              
+              if (!row) return null;
+              
+              return (
+                <div
+                  key={row.id}
+                  data-index={virtualRow.index}
+                  className={cn(
+                    "absolute top-0 left-0 w-full border-b hover:bg-slate-50/70 transition-colors",
+                    row.getIsSelected() && "bg-slate-100/80"
+                  )}
+                  style={{
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <div className="flex h-full w-max min-w-full">
+                    {row.getVisibleCells().map((cell, colIndex) => (
+                      <div 
+                        key={cell.id} 
+                        className="border-r last:border-r-0 px-4 py-2 flex items-center"
+                        data-row-index={virtualRow.index}
+                        data-col-index={colIndex}
+                        style={{ 
+                          width: cell.column.getSize(),
+                        }}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {/* 哨兵元素绝对定位在内容最底部，确保只在滚动到底部时触发加载 */}
+            <div
+              ref={loadMoreRef}
+              style={{
+                height: 1,
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                zIndex: 1,
+              }}
+            />
+            {/* 加载骨架屏，绝对定位在内容区最后一行之后，始终可见 */}
+            {isLoadingMore && (
+              Array.from({ length: pageSize }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className="animate-pulse h-11 bg-slate-100 rounded my-1"
+                  style={{
+                    position: 'absolute',
+                    top: rowVirtualizer.getTotalSize() + idx * 45, // 45为每行高度
+                    left: 0,
+                    right: 0,
+                    width: '100%',
+                    zIndex: 2,
+                  }}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* 底部状态栏 */}
+        <div className="px-6 py-3 border-t flex items-center justify-between bg-white text-sm text-muted-foreground shrink-0">
+          <div>
+            {`已加载 ${totalFetched} 行，共 ${totalDBRowCount} 行`}
+          </div>
+          
+          <div>
+            {Object.keys(rowSelection).length > 0 && (
+              <span className="mr-4">已选择 {Object.keys(rowSelection).length} 行</span>
+            )}
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => void createRecord({ tableId })}
+              className="flex items-center"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" /> 添加行
+            </Button>
+          </div>
         </div>
       </div>
     </div>
