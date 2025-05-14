@@ -8,13 +8,50 @@ import {
   useReactTable,
   getSortedRowModel,
   type SortingState,
+  getFilteredRowModel,
+  type ColumnResizeMode,
+  type ColumnSizingState,
+  type VisibilityState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api } from "~/trpc/react";
 import { Button } from "~/components/ui/button";
-import { Plus, ArrowUpDown } from "lucide-react";
+import { 
+  Plus, 
+  ArrowUpDown, 
+  Eye, 
+  EyeOff, 
+  ChevronDown,
+  GripHorizontal,
+  RefreshCw,
+  Download,
+  Filter,
+} from "lucide-react";
 import EditableCell from "./EditableCell";
 import { useQueryClient } from "@tanstack/react-query";
+import { 
+  DropdownMenu, 
+  DropdownMenuCheckboxItem, 
+  DropdownMenuContent, 
+  DropdownMenuTrigger,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "~/components/ui/dropdown-menu";
+import { cn } from "~/lib/utils";
+
+// 需要创建Tooltip组件
+const Tooltip = ({ children }: { children: React.ReactNode }) => {
+  return <>{children}</>;
+};
+
+const TooltipTrigger = ({ asChild, children }: { asChild?: boolean, children: React.ReactNode }) => {
+  return <>{children}</>;
+};
+
+const TooltipContent = ({ children }: { children: React.ReactNode }) => {
+  return <div className="hidden">{children}</div>;
+};
 
 // 定义Field接口，与Prisma模型对应
 interface Field {
@@ -55,6 +92,9 @@ export default function DataTable({
   const queryClient = useQueryClient();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState({});
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+  const [columnResizeMode] = useState<ColumnResizeMode>('onChange');
   const tableContainerRef = useRef<HTMLDivElement>(null);
   
   // 跟踪当前聚焦的单元格
@@ -151,7 +191,48 @@ export default function DataTable({
         },
         {
           id: field.id,
-          header: field.name,
+          header: ({ column }) => {
+            return (
+              <div className="flex items-center justify-between h-full group">
+                <span className="font-medium">{field.name}</span>
+                <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+                  {column.getCanSort() && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost" 
+                          size="icon"
+                          onClick={column.getToggleSortingHandler()}
+                          className="h-6 w-6 p-0"
+                        >
+                          <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>排序</TooltipContent>
+                    </Tooltip>
+                  )}
+                  <div
+                    className={cn(
+                      "h-4 cursor-col-resize select-none touch-none",
+                      "w-1 bg-muted-foreground/20 hover:bg-muted-foreground/50 ml-2",
+                      "transition-colors duration-200",
+                      column.getIsResizing() && "bg-primary"
+                    )}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      column.getToggleSortingHandler()
+                    }}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          },
           cell: ({ row, column, table }) => {
             const rowIndex = table.getSortedRowModel().rows.findIndex(r => r.id === row.id);
             const columnIndex = table.getAllColumns().findIndex(col => col.id === column.id);
@@ -167,6 +248,11 @@ export default function DataTable({
               />
             );
           },
+          enableSorting: true,
+          enableResizing: true,
+          size: 180,
+          minSize: 100,
+          maxSize: 500,
         }
       )
     );
@@ -181,12 +267,18 @@ export default function DataTable({
     state: {
       sorting,
       rowSelection,
+      columnVisibility,
+      columnSizing,
     },
     enableRowSelection: true,
     onRowSelectionChange: setRowSelection,
     onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibility,
+    onColumnSizingChange: setColumnSizing,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    columnResizeMode,
     manualPagination: true,
     debugTable: false, // 生产环境中关闭调试模式
   });
@@ -340,61 +432,144 @@ export default function DataTable({
   }, [data, fetchNextPage, hasNextPage, isFetching]);
 
   if (isLoading) {
-    return <div className="h-full w-full p-4">加载中...</div>;
+    return (
+      <div className="h-full w-full flex items-center justify-center p-4">
+        <div className="flex flex-col items-center space-y-2">
+          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+          <span className="text-sm text-muted-foreground">加载中...</span>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full flex flex-col">
+      {/* 表格工具栏 */}
+      <div className="px-4 py-2 border-b flex items-center justify-between bg-white">
+        <div className="flex items-center space-x-2">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => void createRecord({ tableId })}
+            className="flex items-center"
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> 添加行
+          </Button>
+          
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => void refreshAllData()}
+                disabled={isLoadingTop}
+                className="flex items-center"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5 mr-1", isLoadingTop && "animate-spin")} /> 
+                刷新
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>刷新数据</TooltipContent>
+          </Tooltip>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="flex items-center">
+                <Filter className="h-3.5 w-3.5 mr-1" /> 过滤
+                <ChevronDown className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>过滤选项</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="justify-between">
+                创建过滤器 <Plus className="h-3.5 w-3.5" />
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="flex items-center">
+                <Eye className="h-3.5 w-3.5 mr-1" /> 字段
+                <ChevronDown className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>显示/隐藏字段</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {table.getAllColumns().map((column) => {
+                // 如果列没有headerValue，则可能是一个特殊列（如操作列），不要显示
+                if (!column.columnDef.header) return null;
+                
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={column.id}
+                    className="capitalize"
+                    checked={column.getIsVisible()}
+                    onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                  >
+                    {typeof column.columnDef.header === 'string' 
+                      ? column.columnDef.header 
+                      : fields.find(f => f.id === column.id)?.name ?? column.id}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="flex items-center">
+                <Download className="h-3.5 w-3.5 mr-1" /> 导出
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>导出数据</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      {/* 表格内容区域 */}
       <div 
-        className="relative h-full overflow-auto border-t" 
+        className="relative flex-1 overflow-auto border-t" 
         ref={tableContainerRef}
-        style={{ height: 'calc(100vh - 140px)' }}
+        style={{ height: 'calc(100vh - 180px)' }}
       >
         {/* 顶部加载指示器 */}
         {isLoadingTop && (
           <div className="sticky top-0 left-0 right-0 z-20 flex justify-center bg-white p-2 text-center border-b">
-            刷新数据中...
+            <div className="flex items-center">
+              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+              <span className="text-sm">刷新数据中...</span>
+            </div>
           </div>
         )}
         
         {/* 表头 */}
-        <table className="min-w-full table-fixed border-collapse sticky top-0 z-10">
-          <thead className="bg-white">
+        <div className="sticky top-0 z-10 bg-white">
+          <div className="flex w-max min-w-full border-b">
             {table.getHeaderGroups().map(headerGroup => (
-              <tr key={headerGroup.id} className="border-b">
+              <div key={headerGroup.id} className="flex w-full">
                 {headerGroup.headers.map(header => (
-                  <th 
+                  <div 
                     key={header.id}
-                    className="border-r px-4 py-2 text-left font-medium text-gray-700 last:border-r-0"
+                    className="border-r last:border-r-0 py-3 px-4 bg-slate-50"
                     style={{ 
-                      width: `${Math.max(150, 100 / columns.length)}px`,
-                      minWidth: `${Math.max(150, 100 / columns.length)}px` 
+                      width: header.getSize(),
                     }}
                   >
-                    {header.isPlaceholder ? null : (
-                      <div
-                        className={
-                          header.column.getCanSort()
-                            ? "flex cursor-pointer select-none items-center"
-                            : ""
-                        }
-                        onClick={header.column.getToggleSortingHandler()}
-                      >
-                        {flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                        {header.column.getCanSort() && (
-                          <ArrowUpDown className="ml-1 h-4 w-4" />
-                        )}
-                      </div>
-                    )}
-                  </th>
+                    {header.isPlaceholder 
+                      ? null 
+                      : flexRender(header.column.columnDef.header, header.getContext())
+                    }
+                  </div>
                 ))}
-              </tr>
+              </div>
             ))}
-          </thead>
-        </table>
+          </div>
+        </div>
         
         {/* 表格内容 - 使用虚拟滚动 */}
         <div
@@ -403,6 +578,7 @@ export default function DataTable({
             width: '100%',
             position: 'relative',
           }}
+          className="w-max min-w-full"
         >
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index];
@@ -413,23 +589,24 @@ export default function DataTable({
               <div
                 key={row.id}
                 data-index={virtualRow.index}
-                className="absolute top-0 left-0 w-full border-b hover:bg-gray-50"
-                data-state={row.getIsSelected() ? "selected" : undefined}
+                className={cn(
+                  "absolute top-0 left-0 w-full border-b hover:bg-slate-50/70 transition-colors",
+                  row.getIsSelected() && "bg-slate-100/80"
+                )}
                 style={{
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <div className="flex h-full">
+                <div className="flex h-full w-max min-w-full">
                   {row.getVisibleCells().map((cell, colIndex) => (
                     <div 
                       key={cell.id} 
-                      className="border-r px-4 py-2 last:border-r-0 flex items-center"
+                      className="border-r last:border-r-0 px-4 py-2 flex items-center"
                       data-row-index={virtualRow.index}
                       data-col-index={colIndex}
                       style={{ 
-                        width: `${Math.max(150, 100 / columns.length)}px`,
-                        minWidth: `${Math.max(150, 100 / columns.length)}px` 
+                        width: cell.column.getSize(),
                       }}
                     >
                       {flexRender(
@@ -443,21 +620,36 @@ export default function DataTable({
             );
           })}
         </div>
+        
+        {/* 底部加载指示器 */}
+        {isLoadingMore && (
+          <div className="sticky bottom-0 left-0 right-0 flex justify-center bg-white p-2 text-center border-t">
+            <div className="flex items-center">
+              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+              <span className="text-sm">加载更多数据...</span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 添加新记录的按钮 */}
-      <div className="mt-4 flex justify-start border-t p-2">
-        <Button 
-          variant="outline" 
-          size="sm"
-          onClick={() => void createRecord({ tableId })}
-          className="flex items-center gap-1"
-        >
-          <Plus className="h-4 w-4" /> 添加行
-        </Button>
-        
-        <div className="ml-4 text-sm text-gray-500">
+      {/* 底部状态栏 */}
+      <div className="px-4 py-2 border-t flex items-center justify-between bg-white text-sm text-muted-foreground">
+        <div>
           {`已加载 ${totalFetched} 行，共 ${totalDBRowCount} 行`}
+        </div>
+        
+        <div>
+          {Object.keys(rowSelection).length > 0 && (
+            <span className="mr-4">已选择 {Object.keys(rowSelection).length} 行</span>
+          )}
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={() => void createRecord({ tableId })}
+            className="flex items-center"
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> 添加行
+          </Button>
         </div>
       </div>
     </div>
