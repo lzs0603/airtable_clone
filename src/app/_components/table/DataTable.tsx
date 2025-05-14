@@ -101,6 +101,7 @@ export default function DataTable({
       {
         getNextPageParam: (lastPage) => lastPage.nextCursor,
         refetchOnWindowFocus: false,
+        staleTime: 30 * 1000, // 减少重新获取频率
       }
     );
 
@@ -112,6 +113,9 @@ export default function DataTable({
   
   const totalDBRowCount = data?.pages[0]?.totalCount ?? 0;
   const totalFetched = flatData.length;
+  
+  // 防止在数据加载时过度重新渲染
+  const memoizedFlatData = React.useMemo(() => flatData, [flatData.length]);
   
   // 创建新记录
   const { mutate: createRecord } = api.record.create.useMutation({
@@ -159,7 +163,7 @@ export default function DataTable({
   
   // 创建表格实例
   const table = useReactTable({
-    data: flatData,
+    data: memoizedFlatData,
     columns,
     state: {
       sorting,
@@ -171,17 +175,17 @@ export default function DataTable({
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     manualPagination: true,
-    debugTable: true,
+    debugTable: false, // 生产环境中关闭调试模式
   });
 
   // 表格虚拟化
   const { rows } = table.getRowModel();
   
   const rowVirtualizer = useVirtualizer({
-    count: totalFetched + (hasNextPage ? 1 : 0),
+    count: totalFetched,
     getScrollElement: () => tableContainerRef.current,
     estimateSize: () => 45, // 每行高度估计
-    overscan: 10,
+    overscan: 5, // 减小overscan以减轻渲染负担
   });
   
   // 当focusedCell变化时，找到对应的元素并聚焦
@@ -206,29 +210,32 @@ export default function DataTable({
   
   // 处理无限滚动
   useEffect(() => {
-    const fetchMoreOnBottomReached = (containerRefElement?: HTMLDivElement | null) => {
+    const fetchMoreOnBottomReached = (e: Event) => {
+      const containerRefElement = e.target as HTMLDivElement;
       if (!containerRefElement) return;
       
       const { scrollHeight, scrollTop, clientHeight } = containerRefElement;
-      // 当用户滚动到底部时，加载更多数据
+      // 当用户滚动到离底部更近的位置时才加载更多数据
       if (
-        scrollHeight - scrollTop - clientHeight < 300 &&
+        scrollHeight - scrollTop - clientHeight < 100 &&
         !isFetching &&
         hasNextPage
       ) {
         void fetchNextPage();
       }
     };
-
-    fetchMoreOnBottomReached(tableContainerRef.current);
     
     const currentRef = tableContainerRef.current;
-    currentRef?.addEventListener('scroll', () => fetchMoreOnBottomReached(currentRef));
+    if (currentRef) {
+      currentRef.addEventListener('scroll', fetchMoreOnBottomReached);
+    }
     
     return () => {
-      currentRef?.removeEventListener('scroll', () => fetchMoreOnBottomReached(currentRef));
+      if (currentRef) {
+        currentRef.removeEventListener('scroll', fetchMoreOnBottomReached);
+      }
     };
-  }, [fetchNextPage, hasNextPage, isFetching, tableContainerRef]);
+  }, [fetchNextPage, hasNextPage, isFetching]);
 
   if (isLoading) {
     return <div className="h-full w-full p-4">加载中...</div>;
@@ -278,12 +285,7 @@ export default function DataTable({
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const row = rows[virtualRow.index];
               
-              // 如果滚动到最后，并且有下一页，加载更多
-              if (!row && hasNextPage && !isFetching) {
-                void fetchNextPage();
-                return null;
-              }
-
+              // 移除这个条件，防止在渲染中触发fetchNextPage
               if (!row) return null;
               
               return (

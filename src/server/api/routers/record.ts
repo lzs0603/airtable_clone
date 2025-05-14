@@ -137,26 +137,79 @@ export const recordRouter = createTRPCRouter({
       return ctx.db.record.delete({ where: { id } });
     }),
 
-  createBulk: protectedProcedure
+    createBulk: protectedProcedure
     .input(createBulkInputSchema)
     .mutation(async ({ ctx, input }): Promise<{ count: number }> => {
       const { tableId, count } = input;
+  
       const table = await ctx.db.table.findFirst({
         where: { id: tableId, base: { ownerId: ctx.session.user.id } },
       });
       if (!table) {
         throw new TRPCError({ code: "FORBIDDEN", message: "无权访问此表格" });
       }
-
-      const batchSize = 1000;
+  
+      const fields = await ctx.db.field.findMany({ where: { tableId } });
+  
+      const batchSize = 500;
       let createdCount = 0;
+  
       for (let i = 0; i < count; i += batchSize) {
         const batchCount = Math.min(batchSize, count - i);
-        await ctx.db.record.createMany({
+  
+        // 1. 批量创建 records
+        const createdRecords = await ctx.db.record.createMany({
           data: Array.from({ length: batchCount }, () => ({ tableId })),
+          skipDuplicates: false,
         });
+  
+        // 2. 获取刚创建的记录
+        const newRecords = await ctx.db.record.findMany({
+          where: { tableId },
+          orderBy: { createdAt: "desc" },
+          take: batchCount,
+        });
+  
+        // 3. 为每个 record 生成 CellValue
+        const cellValues = newRecords.flatMap((record) =>
+          fields.map((field) => {
+            let textValue: string | null = null;
+            let numberValue: number | null = null;
+  
+            switch (field.type) {
+              case "text":
+                textValue = faker.lorem.words();
+                break;
+              case "number":
+                numberValue = faker.number.float({ min: 0, max: 1000 });
+                break;
+              case "email":
+                textValue = faker.internet.email();
+                break;
+              default:
+                textValue = null;
+            }
+  
+            return {
+              recordId: record.id,
+              fieldId: field.id,
+              textValue,
+              numberValue,
+            };
+          })
+        );
+  
+        // 4. 批量写入 CellValue
+        if (cellValues.length > 0) {
+          await ctx.db.cellValue.createMany({
+            data: cellValues,
+            skipDuplicates: false,
+          });
+        }
+  
         createdCount += batchCount;
       }
+  
       return { count: createdCount };
     }),
 });
