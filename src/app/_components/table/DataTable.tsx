@@ -176,6 +176,56 @@ export default function DataTable({
     },
   });
 
+  // 使用useCallback包装fetchNextPage，优化性能并简化操作
+  const debouncedFetchNextPage = React.useCallback(async () => {
+    if (isLoadingMore || isFetching || !hasNextPage) return;
+    
+    try {
+      setIsLoadingMore(true);
+      
+      // 添加日志以便调试
+      console.log('Fetching next page...');
+      
+      // 直接获取下一页数据，简化流程
+      await fetchNextPage();
+      
+      // 设置一个短暂的延迟，防止快速连续触发
+      setTimeout(() => {
+        setIsLoadingMore(false);
+      }, 200);
+    } catch (error) {
+      console.error("Failed to fetch next page:", error);
+      setIsLoadingMore(false);
+    }
+  }, [fetchNextPage, hasNextPage, isFetching, isLoadingMore]);
+  
+  // 添加重新获取数据的函数，用于向上滚动时加载旧数据
+  const refreshAllData = React.useCallback(async () => {
+    if (isLoadingTop || isFetching) return;
+    
+    try {
+      setIsLoadingTop(true);
+      // 保存当前滚动位置
+      if (tableContainerRef.current) {
+        scrollPositionRef.current = tableContainerRef.current.scrollTop;
+      }
+      
+      // 重新加载所有数据
+      await utils.record.list.invalidate({ tableId });
+      
+      // 延迟恢复滚动位置
+      setTimeout(() => {
+        if (tableContainerRef.current) {
+          tableContainerRef.current.scrollTop = scrollPositionRef.current;
+        }
+        setIsLoadingTop(false);
+      }, 300);
+    } catch (error) {
+      console.error("Failed to refresh data:", error);
+      setIsLoadingTop(false);
+    }
+  }, [utils.record.list, tableId, isLoadingTop, isFetching]);
+
   // 创建表格列
   const columnHelper = createColumnHelper<RecordType>();
   
@@ -320,57 +370,6 @@ export default function DataTable({
     }
   }, [focusedCell, table, hasNextPage, fetchNextPage, isFetching, isLoadingMore]);
   
-  // 使用useCallback包装fetchNextPage，添加防抖和锁定
-  const debouncedFetchNextPage = React.useCallback(async () => {
-    if (isLoadingMore || isFetching || !hasNextPage) return;
-    
-    setIsLoadingMore(true);
-    // 连续请求两次，每次返回pageSize条数据
-    await fetchNextPage();
-    if (hasNextPage) {
-      await fetchNextPage();
-    }
-    // 设置一个短暂的延迟，防止快速连续触发
-    setTimeout(() => {
-      setIsLoadingMore(false);
-    }, 300);
-  }, [fetchNextPage, hasNextPage, isFetching, isLoadingMore]);
-  
-  // 添加重新获取数据的函数，用于向上滚动时加载旧数据
-  const refreshAllData = React.useCallback(async () => {
-    if (isLoadingTop || isFetching) return;
-    
-    try {
-      setIsLoadingTop(true);
-      // 保存当前滚动位置
-      if (tableContainerRef.current) {
-        scrollPositionRef.current = tableContainerRef.current.scrollTop;
-      }
-      
-      // 重新加载所有数据
-      await utils.record.list.invalidate({ tableId });
-      
-      // 延迟恢复滚动位置
-      setTimeout(() => {
-        if (tableContainerRef.current) {
-          tableContainerRef.current.scrollTop = scrollPositionRef.current;
-        }
-        setIsLoadingTop(false);
-      }, 300);
-    } catch (error) {
-      console.error("Failed to refresh data:", error);
-      setIsLoadingTop(false);
-    }
-  }, [utils.record.list, tableId, isLoadingTop, isFetching]);
-  
-  // 更新已获取的记录ID集合
-  useEffect(() => {
-    if (flatData.length > 0) {
-      const currentIds = new Set(flatData.map(record => record.id));
-      fetchedIdsRef.current = currentIds;
-    }
-  }, [flatData]);
-
   // 处理无限滚动
   useEffect(() => {
     const handleScroll = (e: Event) => {
@@ -379,48 +378,51 @@ export default function DataTable({
       
       const { scrollHeight, scrollTop, clientHeight } = containerRefElement;
       
-      // 向下滚动时，当滚动到80%位置时就加载更多数据
-      // 计算当前滚动位置占总可滚动区域的百分比
-      const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
+      // 更直接的方式检测是否要加载更多数据
+      // 当滚动到距离底部100px时就加载更多
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
       if (
-        scrollPercentage > 0.8 &&
+        distanceFromBottom < 100 &&
         !isLoadingMore &&
         !isFetching &&
         hasNextPage
       ) {
+        console.log('Loading more data from scroll...');
         void debouncedFetchNextPage();
       }
       
       // 向上滚动时，当接近顶部时刷新数据
       if (
-        scrollTop < 80 &&
+        scrollTop < 50 &&
         !isLoadingTop &&
         !isFetching
       ) {
+        console.log('Refreshing data from top scroll...');
         void refreshAllData();
       }
     };
     
     const currentRef = tableContainerRef.current;
     
-    // 使用防抖包装滚动处理函数，减少频繁触发
-    let scrollTimeout: ReturnType<typeof setTimeout>;
-    const debouncedScroll = (e: Event) => {
-      if (scrollTimeout) clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(() => handleScroll(e), 100);
-    };
-    
     if (currentRef) {
-      currentRef.addEventListener('scroll', debouncedScroll);
+      // 直接添加事件监听，移除防抖处理，减少延迟
+      currentRef.addEventListener('scroll', handleScroll);
     }
     
     return () => {
       if (currentRef) {
-        currentRef.removeEventListener('scroll', debouncedScroll);
+        currentRef.removeEventListener('scroll', handleScroll);
       }
-      if (scrollTimeout) clearTimeout(scrollTimeout);
     };
   }, [debouncedFetchNextPage, hasNextPage, isFetching, isLoadingMore, isLoadingTop, refreshAllData]);
+
+  // 更新已获取的记录ID集合
+  useEffect(() => {
+    if (flatData.length > 0) {
+      const currentIds = new Set(flatData.map(record => record.id));
+      fetchedIdsRef.current = currentIds;
+    }
+  }, [flatData]);
 
   // 预取数据页
   useEffect(() => {
