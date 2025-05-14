@@ -232,7 +232,11 @@ export default function DataTable({
     if (isLoadingMore || isFetching || !hasNextPage) return;
     
     setIsLoadingMore(true);
+    // 连续请求两次，每次返回pageSize条数据
     await fetchNextPage();
+    if (hasNextPage) {
+      await fetchNextPage();
+    }
     // 设置一个短暂的延迟，防止快速连续触发
     setTimeout(() => {
       setIsLoadingMore(false);
@@ -325,10 +329,10 @@ export default function DataTable({
 
   // 预取数据页
   useEffect(() => {
-    // 如果当前有数据，并且不是正在获取数据，预取下一页
-    if (data && data.pages.length > 0 && !isFetching && hasNextPage) {
-      // 预取下一页数据，但不会立即显示
-      void fetchNextPage({ cancelRefetch: true }).catch(e => console.error(e));
+    // 初始加载时获取第一页数据后，立即加载第二页，但不继续自动加载更多
+    if (data && data.pages.length === 1 && !isFetching && hasNextPage) {
+      // 只在初始加载后加载一次第二页，不持续预取
+      void fetchNextPage().catch(e => console.error(e));
     }
   }, [data, fetchNextPage, hasNextPage, isFetching]);
 
@@ -433,13 +437,6 @@ export default function DataTable({
             );
           })}
         </div>
-        
-        {/* 加载中提示 */}
-        {(isFetching || isLoadingMore) && (
-          <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-white p-2 text-center">
-            加载更多数据...
-          </div>
-        )}
       </div>
 
       {/* 添加新记录的按钮 */}
