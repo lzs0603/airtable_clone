@@ -9,6 +9,7 @@ interface EditableCellProps {
   fieldType: string;
   initialValue: string | number | null;
   onTab?: (shift: boolean) => void;
+  tableId: string;
 }
 
 export default function EditableCell({
@@ -17,6 +18,7 @@ export default function EditableCell({
   fieldType,
   initialValue,
   onTab,
+  tableId,
 }: EditableCellProps) {
   const [value, setValue] = useState<string | number | null>(initialValue);
   const [isEditing, setIsEditing] = useState(false);
@@ -32,7 +34,7 @@ export default function EditableCell({
   // 更新单元格值
   const { mutate: updateCellValue } = api.cellValue.upsert.useMutation({
     onSuccess: () => {
-      void utils.record.list.invalidate();
+      void utils.record.list.invalidate({ tableId });
     },
   });
   

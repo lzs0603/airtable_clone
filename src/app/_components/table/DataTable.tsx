@@ -163,6 +163,7 @@ export default function DataTable({
                 fieldType={field.type}
                 initialValue={row.getValue(column.id)}
                 onTab={(shiftKey) => handleTabNavigation(rowIndex, columnIndex, shiftKey)}
+                tableId={tableId}
               />
             );
           },
@@ -171,7 +172,7 @@ export default function DataTable({
     );
     
     return cols;
-  }, [fields, columnHelper, handleTabNavigation]);
+  }, [fields, columnHelper, handleTabNavigation, tableId]);
   
   // 创建表格实例
   const table = useReactTable({
@@ -286,9 +287,11 @@ export default function DataTable({
       
       const { scrollHeight, scrollTop, clientHeight } = containerRefElement;
       
-      // 向下滚动时，当接近底部时加载更多数据
+      // 向下滚动时，当滚动到80%位置时就加载更多数据
+      // 计算当前滚动位置占总可滚动区域的百分比
+      const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
       if (
-        scrollHeight - scrollTop - clientHeight < 80 &&
+        scrollPercentage > 0.8 &&
         !isLoadingMore &&
         !isFetching &&
         hasNextPage
@@ -363,7 +366,10 @@ export default function DataTable({
                   <th 
                     key={header.id}
                     className="border-r px-4 py-2 text-left font-medium text-gray-700 last:border-r-0"
-                    style={{ width: `${Math.max(150, 100 / columns.length)}px` }}
+                    style={{ 
+                      width: `${Math.max(150, 100 / columns.length)}px`,
+                      minWidth: `${Math.max(150, 100 / columns.length)}px` 
+                    }}
                   >
                     {header.isPlaceholder ? null : (
                       <div

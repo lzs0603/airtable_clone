@@ -97,6 +97,9 @@ export const recordRouter = createTRPCRouter({
         skip: cursor,
         take: limit + 1,
         orderBy: { createdAt: "desc" },
+        include: {
+          cellValues: true, // 同时获取关联的单元格值
+        },
       });
 
       let nextCursor: number | null = null;
@@ -151,11 +154,20 @@ export const recordRouter = createTRPCRouter({
   
       const fields = await ctx.db.field.findMany({ where: { tableId } });
   
-      const batchSize = 500;
+      // 增加批次大小以提高效率
+      const batchSize = 1000;
       let createdCount = 0;
+      
+      // 创建批次任务数组
+      const batches = Math.ceil(count / batchSize);
+      
+      console.log(`开始生成 ${count} 条数据，分 ${batches} 批执行`);
   
       for (let i = 0; i < count; i += batchSize) {
         const batchCount = Math.min(batchSize, count - i);
+        const batchNumber = Math.floor(i / batchSize) + 1;
+        
+        console.log(`执行第 ${batchNumber}/${batches} 批，创建 ${batchCount} 条数据`);
   
         // 1. 批量创建 records
         const createdRecords = await ctx.db.record.createMany({
@@ -169,6 +181,8 @@ export const recordRouter = createTRPCRouter({
           orderBy: { createdAt: "desc" },
           take: batchCount,
         });
+        
+        console.log(`已创建 ${newRecords.length} 条记录，开始生成单元格数据`);
   
         // 3. 为每个 record 生成 CellValue
         const cellValues = newRecords.flatMap((record) =>
@@ -201,14 +215,24 @@ export const recordRouter = createTRPCRouter({
   
         // 4. 批量写入 CellValue
         if (cellValues.length > 0) {
-          await ctx.db.cellValue.createMany({
-            data: cellValues,
-            skipDuplicates: false,
-          });
+          // 将大批量的单元格值分批插入，避免单次插入过多数据
+          const cellBatchSize = 5000;
+          for (let j = 0; j < cellValues.length; j += cellBatchSize) {
+            const cellBatch = cellValues.slice(j, j + cellBatchSize);
+            await ctx.db.cellValue.createMany({
+              data: cellBatch,
+              skipDuplicates: false,
+            });
+            
+            console.log(`批次 ${batchNumber}/${batches}: 已写入 ${j + cellBatch.length}/${cellValues.length} 个单元格值`);
+          }
         }
   
         createdCount += batchCount;
+        console.log(`已完成第 ${batchNumber}/${batches} 批，总进度: ${Math.round((createdCount / count) * 100)}%`);
       }
+      
+      console.log(`数据生成完成，共创建 ${createdCount} 条记录`);
   
       return { count: createdCount };
     }),
