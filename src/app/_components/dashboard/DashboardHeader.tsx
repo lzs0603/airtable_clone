@@ -13,6 +13,7 @@ import { cn } from "~/lib/utils";
 
 export default function DashboardHeader({
   user,
+  onToggleSidebar,
 }: {
   user: Partial<{
     id: string;
@@ -21,11 +22,12 @@ export default function DashboardHeader({
     emailVerified: Date | null;
     image: string | null;
   }>;
+  onToggleSidebar?: () => void;
 }) {
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="text-slate-500 hover:text-slate-700">
+        <Button variant="ghost" size="icon" className="text-slate-500 hover:text-slate-700" onClick={onToggleSidebar}>
           <PanelLeft className="h-5 w-5" />
         </Button>
         <div className="flex items-center">

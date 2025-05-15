@@ -3,7 +3,6 @@
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { api } from "~/trpc/react";
-import BaseHeader from "~/app/_components/base/BaseHeader";
 import TableHeader from "~/app/_components/table/TableHeader";
 import DataTable from "~/app/_components/table/DataTable";
 import TableLoading from "~/app/_components/table/TableLoading";
@@ -56,7 +55,6 @@ export default function TablePage() {
   if (isTableLoading || isBaseLoading || isFieldsLoading) {
     return (
       <div className="flex min-h-screen flex-col bg-white">
-        {!isBaseLoading && base && <BaseHeader base={base} />}
         <div className="flex-1 p-4">
           <TableLoading />
         </div>
@@ -78,7 +76,6 @@ export default function TablePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <BaseHeader base={base} />
       <TableHeader 
         table={table} 
         baseId={baseId} 

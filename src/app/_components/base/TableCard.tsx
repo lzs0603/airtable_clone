@@ -29,18 +29,16 @@ interface TableCardProps {
 }
 
 export default function TableCard({ table, baseId }: TableCardProps) {
-  // 为表格卡片分配颜色，确保同一表格总是得到相同的颜色
+  // 为表格卡片分配渐变色，和 BaseCard 统一
   const colorVariants = [
-    "bg-blue-100 text-blue-600",
-    "bg-green-100 text-green-600",
-    "bg-purple-100 text-purple-600",
-    "bg-amber-100 text-amber-600",
-    "bg-rose-100 text-rose-600",
-    "bg-cyan-100 text-cyan-600",
+    "from-purple-500 to-indigo-600",
+    "from-blue-500 to-cyan-600",
+    "from-emerald-500 to-teal-600",
+    "from-orange-500 to-amber-600",
+    "from-pink-500 to-rose-600",
   ];
-  
   const colorIndex = table.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colorVariants.length;
-  const colorStyle = colorVariants[colorIndex];
+  const gradientColor = colorVariants[colorIndex];
   
   // 获取相对时间显示
   const getRelativeTime = (date: Date) => {
@@ -93,12 +91,15 @@ export default function TableCard({ table, baseId }: TableCardProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <div className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all hover:shadow-md">
-        <div className="p-4">
+      <div className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+        {/* 顶部渐变色条 */}
+        <div className={cn("h-2 w-full bg-gradient-to-r", gradientColor)} />
+        <div className="p-5">
           <div className="flex items-start justify-between">
             <Link href={`/base/${baseId}/table/${table.id}`} className="flex-1">
               <div className="flex items-start">
-                <div className={cn("flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md", colorStyle)}>
+                {/* 渐变色 icon 背景 */}
+                <div className={cn("flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br text-white", gradientColor)}>
                   <Database className="h-5 w-5" />
                 </div>
                 <div className="ml-3">
@@ -140,7 +141,7 @@ export default function TableCard({ table, baseId }: TableCardProps) {
           </div>
         </div>
         
-        <div className="flex justify-between bg-slate-50 px-4 py-2 text-xs text-slate-500 border-t border-slate-100">
+        <div className="flex justify-between bg-slate-50 px-5 py-3 text-xs text-slate-500 border-t border-slate-100">
           <div>12条记录</div>
           <div>更新于 {getRelativeTime(table.updatedAt)}</div>
         </div>
