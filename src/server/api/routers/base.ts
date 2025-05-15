@@ -43,4 +43,21 @@ export const baseRouter = createTRPCRouter({
         },
       });
     }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // 校验用户是否有权限删除该基地
+      const base = await ctx.db.base.findFirst({
+        where: {
+          id: input.id,
+          ownerId: ctx.session.user.id,
+        },
+      });
+      if (!base) {
+        throw new Error("无权删除此基地");
+      }
+      // 级联删除由 Prisma schema 保证
+      return ctx.db.base.delete({ where: { id: input.id } });
+    }),
 });

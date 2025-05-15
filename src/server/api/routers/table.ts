@@ -99,4 +99,21 @@ export const tableRouter = createTRPCRouter({
 
       return table;
     }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // 校验用户是否有权限删除该表格
+      const table = await ctx.db.table.findFirst({
+        where: {
+          id: input.id,
+          base: { ownerId: ctx.session.user.id },
+        },
+      });
+      if (!table) {
+        throw new Error("无权删除此表格");
+      }
+      // 级联删除由 Prisma schema 保证
+      return ctx.db.table.delete({ where: { id: input.id } });
+    }),
 }); 
